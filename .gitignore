@@ -1,0 +1,9 @@
+# Ignore data, analysis, logs
+data/**
+analysis/**
+logs/**
+
+# Ignore .here, .Rproj
+.here
+.Rproj.user
+*.Rproj
