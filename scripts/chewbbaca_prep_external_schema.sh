@@ -18,5 +18,6 @@ rm -r "$DATA_DIR"/cgmlst_schema_enterobase_adapted
 apptainer exec -c "$CHEWBBACA_APPTAINER" chewBBACA.py PrepExternalSchema \
 							-g "$DATA_DIR"/cgmlst_schema_enterobase \
 							-o "$DATA_DIR"/cgmlst_schema_enterobase_adapted \
+							--ptf "$DATA_DIR"/cgmlst_schema_enterobase/CD630DERM_training_file.trn \
 							--cpu 8
 

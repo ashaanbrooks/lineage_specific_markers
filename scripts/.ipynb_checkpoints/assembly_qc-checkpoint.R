@@ -29,28 +29,8 @@ AND checkm2.Genome_Size > 3600000
 AND checkm2.Genome_size < 4800000;
 ")
 
-# Load allele presence/absence from chewBBACA
-allele_pa <- read_tsv("analysis/chewbbaca/allele_calls_zeroes/presence_absence.tsv")
 
-# Load allele calls from chewBBACA
-allele_calls <- read_tsv("analysis/chewbbaca/results_alleles.tsv")
 
-# Subset allele calls and presence/absence to only samples passing assembly qc
-allele_calls_qc <- allele_calls |> filter(FILE %in% samples_passing_qc$sample_accession)
-allele_pa_qc <- allele_pa |> filter(FILE %in% samples_passing_qc$sample_accession)
-
-# Remove problematic loci 
-allele_pa_qc <- allele_pa_qc |> select(-CD630_29660, -CD630_31000)
-
-# Remove samples with less than 95% of alleles determined
-
-# Load list of duplicates based on MASH distance
-
-# Filter to only duplicates that have passed QC
-
-# Deduplicate
-
-# Print list of samples for further analysis
 
 
 # Disconnect from database
