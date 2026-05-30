@@ -8,12 +8,10 @@
 
 # Note that for logs to be in correct place, sbatch should be run from the scripts directory
 
-module purge
 module load prodigal/2.6.3
-source define_paths.sh
 
-# Using the CD630 complete sequence NC_009089.1 from https://www.ncbi.nlm.nih.gov/nuccore/NC_009089.1
+# Using the CD630DERM reference genome from https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_000953275.1/
 prodigal \
-	-i "$DATA_DIR"/NC_009089.1.fasta \
-	-t "$DATA_DIR"/cgmlst_schema_ridom/CD630_training_file.trn \
+	-i "$DATA_DIR"/GCF_000953275.1_CD630DERM_genomic.fna \
+	-t "$DATA_DIR"/cgmlst_schema_enterobase/CD630DERM_training_file.trn \
 	-p single

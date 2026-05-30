@@ -1,4 +1,3 @@
-library(data.table)
 
 # ── 1. Convert to data.table (if not already) ─────────────────────────────────
 dt <- as.data.table(allele_calls_qc)
@@ -35,7 +34,7 @@ code_counts <- vapply(all_codes, function(code) {
 error_total <- rowSums(code_counts)
 
 # ── 5. Filter loci by threshold ───────────────────────────────────────────────
-threshold <- 2000
+threshold <- 1000
 keep <- names(error_total)[error_total >= threshold]
 
 code_counts_filtered <- code_counts[keep, , drop = FALSE]
@@ -59,7 +58,6 @@ palette <- c(
 )
 
 # ── 8. Plot ───────────────────────────────────────────────────────────────────
-library(ggplot2)
 
 ggplot(plot_long, aes(x = locus, y = n, fill = category)) +
   geom_bar(stat = "identity") +

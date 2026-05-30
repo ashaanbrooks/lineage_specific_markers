@@ -1,0 +1,357 @@
+---
+title: "Identifying stable cluster regions in C. difficile"
+author: "Ash Brooks"
+date: "2026-05-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+The objective of this analysis is to identify stable clustering regions in 
+*C. difficile*, which represent distinct lineages in the population. These lineages can then serve as labels for the second step of the analysis, where we would like to identify genetic markers that are associated with or specific to different lineages. Based on work like Frentrup et al. (2020), we believe that we will be able to identify a region of stability that separates the *C. difficile* population into distinct and consistent clusters using single-linkage clustering on Hamming distances computed from cgMLST allelic profiles.  
+
+## Load required libraries
+
+```{r}
+library(RSQLite)
+library(DBI)
+library(dplyr)
+library(stringr)
+library(readr)
+library(data.table)
+library(ggplot2)
+library(tidyr)
+```
+
+## Dataset
+
+We opted to use the AllTheBacteria dataset for this analysis, as it provides assemblies, QC information, and Bakta annotations for samples in the database. It includes only Illumina-based assemblies, and all assemblies are assembled with Shovill and then dehosted using the human reference genome GCA 009914755.4. 
+
+## Assembly QC
+
+We opted to exclude samples from incremental release 2025-05, as those do not yet have Bakta annotations available. We then included only samples with sylph species calls marked as *C. difficile* and passing AllTheBacteria's "high quality" filter. This has stricter requirements on the sylph species calls, along with less than 5% contamination, greater than 90% completeness, and maximum 2000 contigs. We additionally imposed a minimum N50 of 50,000 and a genome size between 3.6 and 4.8 Mbp. These size cutoffs are the same as used in Frentrup et al. (2020). 
+
+```{r}
+# Connect to ATB metadata SQLite database
+con <- dbConnect(RSQLite::SQLite(), "data/atb.metadata.202505.sqlite")
+
+# Query the ATB database to get a list of samples passing QC standards
+samples_cdiff <- dbGetQuery(con, "
+SELECT 
+  checkm2.*,
+  assembly_stats.*
+FROM checkm2
+INNER JOIN assembly_stats USING (sample_accession)
+INNER JOIN assembly USING (sample_accession)
+WHERE assembly.asm_fasta_on_osf=1
+AND (assembly.dataset <> 'Incr_release.202505')
+AND assembly.sylph_species='Clostridioides difficile'
+")
+
+# Print number of samples marked as C. difficile
+print(paste0("Samples before filtering: ", length(samples_cdiff$sample_accession)))
+
+# Query the ATB database to get a list of samples passing QC standards
+samples_passing_qc <- dbGetQuery(con, "
+SELECT 
+  checkm2.*,
+  assembly_stats.*
+FROM checkm2
+INNER JOIN assembly_stats USING (sample_accession)
+INNER JOIN assembly USING (sample_accession)
+WHERE assembly.asm_fasta_on_osf=1
+AND (assembly.dataset <> 'Incr_release.202505')
+AND assembly.sylph_species='Clostridioides difficile'
+AND assembly.hq_filter='PASS'
+AND checkm2.Contamination < 5 
+AND checkm2.Completeness_Specific > 0.9
+AND checkm2.Contig_N50 > 50000
+AND checkm2.Genome_Size > 3600000
+AND checkm2.Genome_size < 4800000;
+")
+
+# Print number of samples passing QC filters
+print(paste0("Samples after filtering: ", length(samples_passing_qc$sample_accession)))
+
+dbDisconnect(con)
+```
+### Plotting assembly metrics before and after filtering
+```{r}
+# Plot assembly metrics before filtering
+samples_cdiff <- samples_cdiff[, !duplicated(names(samples_cdiff))]
+samples_cdiff |>
+  rename("N_Contigs" = number) |>
+  pivot_longer(c(Contamination, Completeness_Specific, Contig_N50, Genome_Size, N_Contigs, GC_Content)) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 100) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  facet_wrap(~name, scales = "free")
+
+# Plot assembly metrics after filtering
+samples_passing_qc <- samples_passing_qc[, !duplicated(names(samples_passing_qc))]
+samples_passing_qc|>
+  rename("N_Contigs" = number) |>
+  pivot_longer(c(Contamination, Completeness_Specific, Contig_N50, Genome_Size, N_Contigs, GC_Content)) |>
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 100) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  facet_wrap(~name, scales = "free")
+```
+```
+
+
+## cgMLST Schema
+
+We used the C. difficile cgMLST v2 2,147 gene schema from https://www.cgmlst.org/ncs/schema/Cdifficile/. The schema was adapted using the chewBBACA PrepExternalSchema module with default parameters (0.6 BSR, no length and size filtering). For consistent CDS prediction, a training file was created using the CD630 complete reference sequence NC_009089.1 with Prodigal 2.6.3. 
+
+### Allele calls
+
+We performed allele calling on all samples marked as *C. difficile* using the chewBBACA AlleleCall module in chewBBACA v3.3.10 with default parameters (0.6 BSR, 0.2 size filter). Here, we set a threshold of maximum 5% invalid allele calls per locus for plotting and removal. 
+
+### Evaluation of allele calling results
+
+```{r}
+# Load allele calls from chewBBACA
+allele_calls <- read_tsv("analysis/chewbbaca_ridom/results_alleles.tsv")
+
+# Subset allele calls and presence/absence to only samples passing assembly qc
+allele_calls_qc <- allele_calls |> filter(FILE %in% samples_passing_qc$sample_accession)
+
+# Convert allele calls to data table for faster processing
+dt <- as.data.table(allele_calls_qc)
+# Save names of sample column and loci
+sample_col <- names(dt)[1]
+locus_cols <- names(dt)[-1]
+
+# Replace INF-XXX with XXX for inferred allele calls from chewBBACA
+for (j in locus_cols) {
+  set(dt, j = j, value = sub("^INF-", "", dt[[j]]))
+}
+
+# Convert all allele calls (not including sample names) to character matrix
+m <- as.matrix(dt[, ..locus_cols])
+
+# Create a logical matrix where TRUE represents a numeric allele call (valid)
+# And FALSE represents a non-numeric allele call (error code)
+is_numeric_mat <- matrix(
+  !is.na(suppressWarnings(as.numeric(m))),
+  nrow = nrow(m), ncol = ncol(m),
+  dimnames = dimnames(m)
+)
+
+# Get a vector of the error codes present in the allele calls
+all_codes <- sort(unique(m[!is_numeric_mat]))
+
+# Count number of valid allele calls per locus
+numeric_counts <- colSums(is_numeric_mat)
+
+# Count number of each error code per locus,result: matrix [loci × error_codes]
+code_counts <- vapply(all_codes, function(code) {
+  colSums(m == code, na.rm = TRUE)
+}, numeric(length(locus_cols)))
+
+# Sum to get total number of invalid calls per locus
+error_total <- rowSums(code_counts)
+
+# Filter loci by threshold (each locus must have less than (threshold) invalid calls)
+# Here we impose max 5% missing calls as the threshold
+threshold <- ceiling(nrow(allele_calls_qc) * 0.05)
+loci_to_remove <- names(error_total)[error_total >= threshold]
+
+# Subset error code and valid allele counts for only problematic loci for plotting
+code_counts_problematic <- code_counts[loci_to_remove, , drop = FALSE]
+numeric_problematic     <- numeric_counts[loci_to_remove]
+
+# Prep data for plotting 
+plot_dt <- as.data.table(code_counts_problematic, keep.rownames = "locus")
+plot_dt[, Numeric := numeric_problematic]
+
+plot_long <- melt(plot_dt,
+                  id.vars       = "locus",
+                  variable.name = "category",
+                  value.name    = "n")
+plot_long <- plot_long[n > 0]  # drop zero-count combinations
+
+# Set colour pallette - valid allele calls are grey, all error codes are coloured
+error_codes <- setdiff(unique(plot_long$category), "Numeric")
+palette <- c(
+  setNames(scales::hue_pal()(length(error_codes)), error_codes),
+  Numeric = "#CCCCCC")
+  
+# Plot stacked barplot showing numbers of each error code and valid calls
+# For each problematic locus
+# NOTE: might also be interesting to see how many alleles are being inferred
+ggplot(plot_long, aes(x = locus, y = n, fill = category)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = palette, name = "Call type") +
+  labs(title = paste0("Loci with ≥ ", threshold, " non-numeric calls"),
+       x = "Locus", y = "Count") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+print(paste0("Number of loci to remove: ", length(loci_to_remove)))
+```
+
+From this plot, we can see that many of the loci have entirely undetermined alleles across all samples. The majority of these are marked as NIPHEM (Non-Informative Paralogous Hit, Exact Match), implying that these genes are duplicated and are not good candidates for allele typing. ALM (Allele Larger than Mode) and ASM (Allele Smaller than Mode) are assigned to alleles more than 20% larger or smaller than the mode allele length in the schema. hwne it is assigned to all samples, it probably means the mode length in the schema is not representative of allele length in the larger dataset, or there is some other issue. Some loci are also marked as LNF (Locus not Found) across all samples. This probably reflects a difference in how chewBBACA recognized alleles compared to the SeqSphere software used to make the schema. Finally, two loci have a large amount of PAMA (Paralogous Match) calls. This suggests that these two loci are paralogs in the schema. There is probably a more nuanced solution to investigate why these different loci are not being called correctly, but for simplicity I opted here to remove the 67 loci with 5% or more invalid allele calls. 
+
+
+### Filtering invalid loci and samples
+
+After removing loci with 5% or more invalid allele calls, we remove any samples with less than 95% cgMLST profile completeness. 
+
+```{r}
+# Remove problematic loci 
+allele_calls_loci_filtered <- allele_calls_qc |> select(-all_of(loci_to_remove))
+
+# Remove samples with less than 95% of alleles determined 
+is_numeric_mat_filtered <- is_numeric_mat[, !colnames(is_numeric_mat) %in% loci_to_remove]
+valid_allele_threshold <- ceiling(ncol(is_numeric_mat_filtered) * 0.95)
+valid_counts <- rowSums(is_numeric_mat_filtered)
+samples_to_remove <- allele_calls_qc$FILE[valid_counts < valid_allele_threshold]
+
+# Note - this is no samples at 95% threshold
+samples_passing_cgmlst <- samples_passing_qc |> filter(!sample_accession %in% samples_to_remove)
+
+print(paste0("Number of loci to remove: ", length(samples_passing_qc$sample_accession) - length(samples_passing_cgmlst$sample_accession)))
+```
+
+After removing problematic loci, there are no samples with less than 95% cgMLST profile completeness. 
+
+## Duplicate detection and removal
+
+Duplicate detection was performed using MASH v2.3 with a sketch size of 10,000 and default k-mer length of 21. Duplicates were marked as those with 10,000/10,000 matching sketches. The rationale behind duplicate detection was that having replicates of the same biological sample or many highly similar samples would make the clusters seem more stable than they should, as essentially identical samples would always cluster together. 
+
+```{r}
+# Load list of duplicates based on MASH distance
+mash_duplicates <- read_tsv("analysis/mash/duplicates.txt", 
+                            col_names = c("reference", "query", "distance", "p_value", "shared_hashes"))
+
+# Remove filenames and extensions to leave sample accessions
+mash_duplicates <- mash_duplicates |> mutate(reference = tools::file_path_sans_ext(basename(reference))) |>
+  mutate(query = tools::file_path_sans_ext(basename(query)))
+
+# Filter to only duplicates that have passed QC
+mash_duplicates_qc <- mash_duplicates |> filter(reference %in% samples_passing_cgmlst$sample_accession,
+                                                query %in% samples_passing_cgmlst$sample_accession)
+
+# Deduplicate - select the sample from each pair with higher N50
+# Add the other to a list of duplicates to remove
+duplicates_to_keep <- mash_duplicates_qc |>
+  left_join(samples_passing_cgmlst, by = c("reference" = "sample_accession")) |>
+  rename(n50_reference = Contig_N50) |>
+  left_join(samples_passing_cgmlst, by = c("query" = "sample_accession")) |>
+  rename(n50_query = Contig_N50) |>
+  mutate(
+    better_sample = case_when(
+      n50_reference > n50_query  ~ reference,
+      n50_query > n50_reference  ~ query,
+      TRUE                       ~ pmin(reference, query)  # tie-break alphabetically
+    ),
+    worse_sample = case_when(
+      n50_reference > n50_query  ~ query,
+      n50_query > n50_reference  ~ reference,
+      TRUE                       ~ pmax(reference, query)
+    )
+  ) |>
+  filter(!better_sample %in% worse_sample) |>
+  distinct(better_sample) |>
+  pull(better_sample)
+
+duplicates_to_remove <- c(mash_duplicates_qc$reference, mash_duplicates_qc$query) |>
+  unique() |>
+  setdiff(duplicates_to_keep)
+
+samples_passing_deduplication <- samples_passing_cgmlst |> filter(!sample_accession %in% duplicates_to_remove)
+
+print(paste0("Duplicate samples removed: ", length(duplicates_to_remove)))
+```
+
+
+## Write final lists of samples for further analysis
+```{r}
+# Print list of samples for further analysis
+#write_lines(samples_passing_deduplication$sample_accession, "analysis/samples_for_clustering.txt")
+
+# Print list of loci to remove before further analysis
+#write_lines(loci_to_remove, "analysis/loci_to_remove.txt")
+```
+
+## Single linkage clustering
+
+Pairwise Hamming distances between samples were calculated using cgmlst-dists v0.6.0. The resulting pairwise distance matrix was then used to find single-linkage clusters at thresholds 1-1000 using the HC module of ReporTree v2.6.0. A python script was used to find the number of clusters, number of singletons not assigned to any cluster, and average silhouette score with and without singletons at each distance threshold. Additionally, the adjusted Rand index and adjusted mutual information was computed pairwise between all thresholds. 
+
+```{r}
+# Load cluster statistics csv output from python script
+cluster_stats <- read_csv("analysis/cluster_stats_py.csv")
+
+# Source script with AWC function from https://github.com/rossimk/nAWC
+source("scripts/wallace-helper.R")
+
+# Load clustering assigments at all thresholds
+clusters <- read_tsv("analysis/reportree/ridom_partitions.tsv")
+thresholds <- 1:(ncol(clusters) - 1)
+
+# Count number of clusters and nAWC at each threshold
+nclust_and_nawc <- lapply(thresholds, function(t) {
+  vals <- clusters[[t + 1]]
+  data.frame(
+    threshold       = names(clusters)[t+1],
+    nclust      = length(unique(vals[str_starts(vals, "cluster_")])),
+    nawc            = tryCatch(
+      adj_wallace(clusters[[t + 2]], vals)$Adjusted_Wallace_A_vs_B,
+      error = function(e) NA
+    ))}) |> bind_rows()
+    
+  # Join with existing cluster stats
+  cluster_stats <- cluster_stats |> left_join(nclust_and_nawc)
+```
+
+```{r}
+# Find regions of cluster stability based on nAWC > 0.99 threshold and min length of 25
+nawc_stable_regions <- find_stable_regions(cluster_stats, "nawc", 0.99, 25)
+```
+
+```{r}
+# Plot nAWC and overlay stable regions
+
+nawc_stable_regions$region <- factor(seq_len(nrow(nawc_stable_regions)))
+
+ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = nawc)) +
+  geom_rect(data = nawc_stable_regions,
+            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = region),
+            inherit.aes = FALSE,
+            alpha = 0.2) +
+  geom_line() +
+  labs(x = "index", y = "nawc")
+
+# Plot number of clusters and overlay stable regions
+ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = nclust)) +
+  geom_rect(data = nawc_stable_regions,
+            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = region),
+            inherit.aes = FALSE,
+            alpha = 0.2) +
+  geom_line() +
+  labs(x = "index", y = "nclust")
+  
+# Plot silhouette scores and overlay stable regions
+ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = silhouette_all)) +
+  geom_rect(data = nawc_stable_regions,
+            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = region),
+            inherit.aes = FALSE,
+            alpha = 0.2) +
+  geom_line() +
+  labs(x = "index", y = "silhouette - all")
+  
+ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = silhouette_non_singleton)) +
+  geom_rect(data = nawc_stable_regions,
+            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = region),
+            inherit.aes = FALSE,
+            alpha = 0.2) +
+  geom_line() +
+  labs(x = "index", y = "silhouette - non-singletons")
+```
+

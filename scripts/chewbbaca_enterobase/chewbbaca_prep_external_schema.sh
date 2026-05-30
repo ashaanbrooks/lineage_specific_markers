@@ -8,19 +8,16 @@
 
 # Note that for logs to be in correct place, sbatch should be run from the scripts directory
 
-module purge
-module load apptainer/1.4.5
 
-source define_paths.sh
-
+module load apptainer
 
 # Output directory can't already exist
-rm -r "$DATA_DIR"/cgmlst_schema_ridom_adapted
+rm -r "$DATA_DIR"/cgmlst_schema_enterobase_adapted
 
 # Using all default parameters: 0.6 BSR, no length and size filtering, translation table 11
 apptainer exec -c "$CHEWBBACA_APPTAINER" chewBBACA.py PrepExternalSchema \
-							-g "$DATA_DIR"/cgmlst_schema_ridom \
-							-o "$DATA_DIR"/cgmlst_schema_ridom_adapted \
-							--ptf "$DATA_DIR"/cgmlst_schema_ridom/CD630_training_file.trn \
+							-g "$DATA_DIR"/cgmlst_schema_enterobase \
+							-o "$DATA_DIR"/cgmlst_schema_enterobase_adapted \
+							--ptf "$DATA_DIR"/cgmlst_schema_enterobase/CD630DERM_training_file.trn \
 							--cpu 8
 

@@ -7,3 +7,6 @@ logs/**
 .here
 .Rproj.user
 *.Rproj
+.RData
+.Rhistory
+.env

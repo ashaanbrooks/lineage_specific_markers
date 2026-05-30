@@ -1,15 +1,16 @@
 #!/bin/bash
 
-#SBATCH --time=1:00:00
+#SBATCH --time=2:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=1G
 
-mkdir -p "$DATA_DIR"/cgmlst_schema_enterobase
+source define_paths.sh
 
-wget -r -np -nd -A "*.fasta.gz" \
-  -P "$DATA_DIR"/cgmlst_schema_enterobase \
-  https://enterobase.warwick.ac.uk/schemes/clostridium.cgMLSTv1/
+# Download the C. difficile cgMLST v2 scheme from https://www.cgmlst.org/ncs/schema/Cdifficile/
+wget -O "$DATA_DIR"/cgmlst_schema_ridom.zip https://www.cgmlst.org/ncs/schema/Cdifficile/alleles/
 
 # Decompress
-gunzip "$DATA_DIR"/cgmlst_schema_enterobase/*.fasta.gz
+mkdir -p "$DATA_DIR"/cgmlst_schema_ridom
+unzip "$DATA_DIR"/cgmlst_schema_ridom.zip -d "$DATA_DIR"/cgmlst_schema_ridom
 
+# Downloaded May 27, 2026
