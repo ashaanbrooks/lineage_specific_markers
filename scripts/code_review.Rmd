@@ -9,14 +9,16 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Background
+## Project
 
 The objective of this analysis is to identify stable clustering regions in 
 *C. difficile*, which represent distinct lineages in the population. These lineages can then serve as labels for the second step of the analysis, where we would like to identify genetic markers that are associated with or specific to different lineages. Based on work like Frentrup et al. (2020), we believe that we will be able to identify a region of stability that separates the *C. difficile* population into distinct and consistent clusters using single-linkage clustering on Hamming distances computed from cgMLST allelic profiles.  
 
-## Load required libraries
 
 ```{r}
+here::i_am("scripts/code_review.Rmd")
+
+library(pals)
 library(RSQLite)
 library(DBI)
 library(dplyr)
@@ -25,6 +27,7 @@ library(readr)
 library(data.table)
 library(ggplot2)
 library(tidyr)
+library(here)
 ```
 
 ## Dataset
@@ -37,7 +40,7 @@ We opted to exclude samples from incremental release 2025-05, as those do not ye
 
 ```{r}
 # Connect to ATB metadata SQLite database
-con <- dbConnect(RSQLite::SQLite(), "data/atb.metadata.202505.sqlite")
+con <- dbConnect(RSQLite::SQLite(), here("data/atb.metadata.202505.sqlite"))
 
 # Query the ATB database to get a list of samples passing QC standards
 samples_cdiff <- dbGetQuery(con, "
@@ -79,7 +82,9 @@ print(paste0("Samples after filtering: ", length(samples_passing_qc$sample_acces
 
 dbDisconnect(con)
 ```
-### Plotting assembly metrics before and after filtering
+
+We would like to plot the assembly metrics before and after filtering:
+
 ```{r}
 # Plot assembly metrics before filtering
 samples_cdiff <- samples_cdiff[, !duplicated(names(samples_cdiff))]
@@ -101,22 +106,16 @@ samples_passing_qc|>
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
   facet_wrap(~name, scales = "free")
 ```
-```
 
-
-## cgMLST Schema
+## Distance Metric - cgMLST allelic distances
 
 We used the C. difficile cgMLST v2 2,147 gene schema from https://www.cgmlst.org/ncs/schema/Cdifficile/. The schema was adapted using the chewBBACA PrepExternalSchema module with default parameters (0.6 BSR, no length and size filtering). For consistent CDS prediction, a training file was created using the CD630 complete reference sequence NC_009089.1 with Prodigal 2.6.3. 
 
-### Allele calls
-
 We performed allele calling on all samples marked as *C. difficile* using the chewBBACA AlleleCall module in chewBBACA v3.3.10 with default parameters (0.6 BSR, 0.2 size filter). Here, we set a threshold of maximum 5% invalid allele calls per locus for plotting and removal. 
-
-### Evaluation of allele calling results
 
 ```{r}
 # Load allele calls from chewBBACA
-allele_calls <- read_tsv("analysis/chewbbaca_ridom/results_alleles.tsv")
+allele_calls <- read_tsv(here("analysis/chewbbaca_ridom/results_alleles.tsv"))
 
 # Subset allele calls and presence/absence to only samples passing assembly qc
 allele_calls_qc <- allele_calls |> filter(FILE %in% samples_passing_qc$sample_accession)
@@ -198,9 +197,6 @@ print(paste0("Number of loci to remove: ", length(loci_to_remove)))
 
 From this plot, we can see that many of the loci have entirely undetermined alleles across all samples. The majority of these are marked as NIPHEM (Non-Informative Paralogous Hit, Exact Match), implying that these genes are duplicated and are not good candidates for allele typing. ALM (Allele Larger than Mode) and ASM (Allele Smaller than Mode) are assigned to alleles more than 20% larger or smaller than the mode allele length in the schema. hwne it is assigned to all samples, it probably means the mode length in the schema is not representative of allele length in the larger dataset, or there is some other issue. Some loci are also marked as LNF (Locus not Found) across all samples. This probably reflects a difference in how chewBBACA recognized alleles compared to the SeqSphere software used to make the schema. Finally, two loci have a large amount of PAMA (Paralogous Match) calls. This suggests that these two loci are paralogs in the schema. There is probably a more nuanced solution to investigate why these different loci are not being called correctly, but for simplicity I opted here to remove the 67 loci with 5% or more invalid allele calls. 
 
-
-### Filtering invalid loci and samples
-
 After removing loci with 5% or more invalid allele calls, we remove any samples with less than 95% cgMLST profile completeness. 
 
 ```{r}
@@ -221,13 +217,13 @@ print(paste0("Number of loci to remove: ", length(samples_passing_qc$sample_acce
 
 After removing problematic loci, there are no samples with less than 95% cgMLST profile completeness. 
 
-## Duplicate detection and removal
+### Duplicate detection
 
 Duplicate detection was performed using MASH v2.3 with a sketch size of 10,000 and default k-mer length of 21. Duplicates were marked as those with 10,000/10,000 matching sketches. The rationale behind duplicate detection was that having replicates of the same biological sample or many highly similar samples would make the clusters seem more stable than they should, as essentially identical samples would always cluster together. 
 
 ```{r}
 # Load list of duplicates based on MASH distance
-mash_duplicates <- read_tsv("analysis/mash/duplicates.txt", 
+mash_duplicates <- read_tsv(here("analysis/mash/duplicates.txt"), 
                             col_names = c("reference", "query", "distance", "p_value", "shared_hashes"))
 
 # Remove filenames and extensions to leave sample accessions
@@ -270,55 +266,65 @@ samples_passing_deduplication <- samples_passing_cgmlst |> filter(!sample_access
 print(paste0("Duplicate samples removed: ", length(duplicates_to_remove)))
 ```
 
+Writing the lists of samples to pass to further analysis:
 
-## Write final lists of samples for further analysis
 ```{r}
 # Print list of samples for further analysis
-#write_lines(samples_passing_deduplication$sample_accession, "analysis/samples_for_clustering.txt")
+#write_lines(samples_passing_deduplication$sample_accession, here("analysis/samples_for_clustering.txt"))
 
 # Print list of loci to remove before further analysis
-#write_lines(loci_to_remove, "analysis/loci_to_remove.txt")
+#write_lines(loci_to_remove, here("analysis/loci_to_remove.txt"))
 ```
 
-## Single linkage clustering
+## Clustering
 
-Pairwise Hamming distances between samples were calculated using cgmlst-dists v0.6.0. The resulting pairwise distance matrix was then used to find single-linkage clusters at thresholds 1-1000 using the HC module of ReporTree v2.6.0. A python script was used to find the number of clusters, number of singletons not assigned to any cluster, and average silhouette score with and without singletons at each distance threshold. Additionally, the adjusted Rand index and adjusted mutual information was computed pairwise between all thresholds. 
+Pairwise Hamming distances between samples were calculated from the allelic profiles. using cgmlst-dists v0.6.0. The resulting pairwise distance matrix was then used to find single-linkage clusters at thresholds 1-1000 using the HC module of ReporTree v2.6.0. A python script was used to find the number of clusters, number of singletons not assigned to any cluster, and average silhouette score with and without singletons at each distance threshold. We will load this, and additionally calculate the neighbourhood adjusted Wallace coefficient (nAWC) at all thresholds using R functions from https://github.com/rossimk/nAWC. 
 
 ```{r}
 # Load cluster statistics csv output from python script
-cluster_stats <- read_csv("analysis/cluster_stats_py.csv")
+cluster_stats <- read_csv(here("analysis/cluster_stats_py.csv"))
 
 # Source script with AWC function from https://github.com/rossimk/nAWC
-source("scripts/wallace-helper.R")
+source(here("scripts/wallace-helper.R"))
 
 # Load clustering assigments at all thresholds
-clusters <- read_tsv("analysis/reportree/ridom_partitions.tsv")
+clusters <- read_tsv(here("analysis/reportree/ridom_partitions.tsv"))
 thresholds <- 1:(ncol(clusters) - 1)
 
-# Count number of clusters and nAWC at each threshold
-nclust_and_nawc <- lapply(thresholds, function(t) {
+# Calculate nAWC at each threshold
+nawc_df <- lapply(thresholds, function(t) {
   vals <- clusters[[t + 1]]
   data.frame(
     threshold       = names(clusters)[t+1],
-    nclust      = length(unique(vals[str_starts(vals, "cluster_")])),
     nawc            = tryCatch(
       adj_wallace(clusters[[t + 2]], vals)$Adjusted_Wallace_A_vs_B,
       error = function(e) NA
     ))}) |> bind_rows()
     
   # Join with existing cluster stats
-  cluster_stats <- cluster_stats |> left_join(nclust_and_nawc)
+  cluster_stats <- cluster_stats |> left_join(nawc_df)
 ```
 
+Next, we want to define stable regions, where the clustering assignments do not change substantially from one threshold to the next. For the following figures, I chose to define a stable region as being a minimum of 25 consecutive thresholds for which the nAWC is at least 0.99. 
+
 ```{r}
+# Source functions script with find_stable_regions() function
+source(here("scripts/functions.R"))
+
 # Find regions of cluster stability based on nAWC > 0.99 threshold and min length of 25
 nawc_stable_regions <- find_stable_regions(cluster_stats, "nawc", 0.99, 25)
-```
 
-```{r}
+# Set up region labels for the plots
+nawc_stable_regions <- nawc_stable_regions |>
+  mutate(
+    region = factor(seq_len(n())),
+    region_label = paste0(start, "–", end)
+  )
+
+# Create distinct colour pallette for the regions - only works for up to 25 stable regions!
+region_colours <- unname(cols25(nrow(nawc_stable_regions)))
+
 # Plot nAWC and overlay stable regions
-
-nawc_stable_regions$region <- factor(seq_len(nrow(nawc_stable_regions)))
 
 ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = nawc)) +
   geom_rect(data = nawc_stable_regions,
@@ -326,16 +332,18 @@ ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = nawc)) +
             inherit.aes = FALSE,
             alpha = 0.2) +
   geom_line() +
-  labs(x = "index", y = "nawc")
+  scale_fill_manual(values = region_colours, labels = nawc_stable_regions$region_label, name = "stable region") + 
+  labs(x = "Threshold", y = "nAWC", fill = "Stable regions")
 
 # Plot number of clusters and overlay stable regions
-ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = nclust)) +
+ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = n_clusters)) +
   geom_rect(data = nawc_stable_regions,
             aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = region),
             inherit.aes = FALSE,
             alpha = 0.2) +
   geom_line() +
-  labs(x = "index", y = "nclust")
+  scale_fill_manual(values = region_colours, labels = nawc_stable_regions$region_label, name = "stable region") + 
+  labs(x = "Threshold", y = "Number of clusters", fill = "Stable regions")
   
 # Plot silhouette scores and overlay stable regions
 ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = silhouette_all)) +
@@ -344,7 +352,8 @@ ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = silhouette_all))
             inherit.aes = FALSE,
             alpha = 0.2) +
   geom_line() +
-  labs(x = "index", y = "silhouette - all")
+  scale_fill_manual(values = region_colours, labels = nawc_stable_regions$region_label, name = "stable region") + 
+  labs(x = "Threshold", y = "Silhouette - all", fill = "Stable regions")
   
 ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = silhouette_non_singleton)) +
   geom_rect(data = nawc_stable_regions,
@@ -352,6 +361,112 @@ ggplot(cluster_stats, aes(x = seq_len(nrow(cluster_stats)), y = silhouette_non_s
             inherit.aes = FALSE,
             alpha = 0.2) +
   geom_line() +
-  labs(x = "index", y = "silhouette - non-singletons")
+  scale_fill_manual(values = region_colours, labels = nawc_stable_regions$region_label, name = "stable region") + 
+  labs(x = "Threshold", y = "Silhouette - non-singletons", fill = "Stable regions")
 ```
+
+From these plots, we can see that the largest informative stable region is from thresholds 289-685, and it also has the highest silhouette scores. However, there are not a very large number of clusters in this region, so it may be at lower resolution than traditional 7-gene MLST. Next, we use the adjusted Wallace coefficient to compare the single-linkage clusters at all thresholds to 7-gene STs. The adjusted Wallace coefficient is useful for this as it is asymmetric, allowing us to see if clusters are splitting into multiple STs, or if STs are splitting into multiple clusters. 
+
+```{r}
+# Compare distance thresholds to sequence types
+
+# Load ST information
+mlst_results <- read.table(here("data/mlst_new_all.tsv"), sep = "\t", header = FALSE,
+                   col.names = c("sample", "scheme", "st", "adk", "atpA", "dxr", "glyA", "recA", "sodA", "tpi"))
+mlst_results <- mlst_results |> mutate(sample = gsub('"', '', sample)) |> mutate(sample = tools::file_path_sans_ext(basename(sample)))
+
+mlst_results <- mlst_results[match(clusters$sequence, mlst_results$sample), ]
+
+# Get adjusted wallace comparisons at all cluster levels
+
+st_cluster_comparison <- lapply(seq_len(ncol(clusters))[-1], function(i) {
+  col <- clusters[, i, drop = TRUE]
+  threshold <- i
+  tryCatch({
+    cluster_vs_st <- adj_wallace(col, mlst_results$st)$Adjusted_Wallace_A_vs_B
+    st_vs_cluster <- adj_wallace(col, mlst_results$st)$Adjusted_Wallace_B_vs_A
+    tibble(threshold = threshold, cluster_vs_st = cluster_vs_st, st_vs_cluster = st_vs_cluster)
+  }, error = function(e) {
+    tibble(threshold = threshold, cluster_vs_st = NA, st_vs_cluster = NA)
+  })
+}) |> bind_rows()
+
+# Plot
+st_cluster_comparison |>
+  pivot_longer(cols = c(cluster_vs_st, st_vs_cluster), 
+               names_to = "direction", 
+               values_to = "value") |>
+  ggplot(aes(x = threshold, y = value, colour = direction, group = direction)) +
+  geom_rect(data = nawc_stable_regions,
+            aes(xmin = start, xmax = end, ymin = -Inf, ymax = Inf, fill = region),
+            inherit.aes = FALSE,
+            alpha = 0.2) +
+  geom_line() +
+  scale_fill_manual(values = region_colours, labels = nawc_stable_regions$region_label, name = "stable region") +
+  labs(x = "threshold", y = "adjusted wallace", colour = "direction", fill = "stable region") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+This figure shows that in the 289-685 stable region, the ST vs cluster nAWC is higher than the cluster vs ST nAWC. This suggests that while pairs that are in the same ST tend to be in the same cluster, pairs in the same cluster are not always in the same ST. This generally happens when the clusters are larger and contain multiple STs, which is something I should further investigate. I also think it suggests that while the 45-88 region is a smaller stable region, it may be more useful for further analysis as it appears to be at higher resolution than 7-gene MLST, and offers the opportunity to find genes that are dinstict to more closely related lineages. 
+
+Finally, we also include a heatmap of the pairwise adjusted mutual information (AMI) as another way of visualizing the size of the stable regions. AMI was calculated using FastAMI, with a accuracy_goal of 0.001. AMI was used here instead of AWC as it is symmetric, and instead of the adjusted Rand index as it better accounts for unbalanced clusterings, with variable cluster sizes. 
+
+```{r}
+# Load pairwise AMI data
+ami_pairs <- read_csv(here("analysis/pairwise_ami.csv"))
+
+# Numeric sort order from names like "single-1x1.0"
+level_order <- ami_pairs |>
+  select(threshold_1, threshold_2) |>
+  unlist() |>
+  unique() |>
+  (\(x) x[order(as.numeric(gsub(".*-(\\d+)x.*", "\\1", x)))])()
+
+# Subset of labels to display
+n <- length(level_order)
+break_labels <- level_order[c(1, n %/% 2, n)]
+
+# Build symmetric data
+ami_symmetric <- ami_pairs |>
+  select(threshold_1, threshold_2, adj_mutual_info) |>
+  bind_rows(
+    ami_pairs |>
+      rename(threshold_1 = threshold_2, threshold_2 = threshold_1)
+  ) |>
+  bind_rows(
+    tibble(
+      threshold_1 = unique(c(ami_pairs$threshold_1, ami_pairs$threshold_2)),
+      threshold_2 = unique(c(ami_pairs$threshold_1, ami_pairs$threshold_2)),
+      adj_mutual_info = 1
+    )
+  ) |>
+  mutate(
+    threshold_1 = factor(threshold_1, levels = level_order),
+    threshold_2 = factor(threshold_2, levels = level_order)
+  )
+
+# Plot
+ami_symmetric |>
+  ggplot(aes(x = threshold_1, y = threshold_2, fill = adj_mutual_info)) +
+  geom_tile() +
+  scale_fill_gradientn(
+  colours = c("white", "lightyellow", "orange", "red", "darkred"),
+  values   = scales::rescale(c(0, 0.7, 0.9, 0.95, 1)),
+  limits   = c(0, 1),
+  name     = "AMI"
+) + 
+  scale_x_discrete(breaks = break_labels) +
+  scale_y_discrete(limits = rev, breaks = break_labels) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank()
+  ) +
+  labs(x = NULL, y = NULL, title = "Adjusted Mutual Information")
+
+```
+
+
 

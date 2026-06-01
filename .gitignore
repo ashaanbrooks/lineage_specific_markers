@@ -1,7 +1,8 @@
-# Ignore data, analysis, logs
+# Ignore data, analysis, logs, results
 data/**
 analysis/**
 logs/**
+results/**
 
 # Ignore .here, .Rproj
 .here

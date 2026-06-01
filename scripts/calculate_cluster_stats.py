@@ -1,6 +1,5 @@
 from pathlib import Path
 from itertools import combinations
-
 import numpy as np
 import pandas as pd
 
@@ -10,7 +9,6 @@ from sklearn.metrics import (
     silhouette_score,
 )
 
-from joblib import Parallel, delayed
 
 base_dir = Path(__file__).parent.parent
 
@@ -107,7 +105,7 @@ for t, vals in enumerate(cluster_arrays):
     per_threshold.append({
         "threshold": threshold_cols[t],
 
-        "n_clusters": labels.str.startswith("cluster_").sum(),
+        "n_clusters": labels[labels.str.startswith("cluster_")].nunique(),
 
         "n_singletons": labels.str.startswith("singleton_").sum(),
 
@@ -139,36 +137,3 @@ pd.DataFrame(per_threshold).to_csv(
     index=False
 )
 
-# ---------------------------------------------------------------------
-# Pairwise threshold comparison statistics
-# ---------------------------------------------------------------------
-
-def compute_pair(i, j):
-
-    return {
-        "threshold_1": threshold_cols[i],
-
-        "threshold_2": threshold_cols[j],
-
-        "adj_rand": adjusted_rand_score(
-            cluster_arrays[i],
-            cluster_arrays[j]
-        ),
-
-        "adj_mutual_info": adjusted_mutual_info_score(
-            cluster_arrays[i],
-            cluster_arrays[j]
-        )
-    }
-
-pairs = list(combinations(range(len(threshold_cols)), 2))
-
-results = Parallel(n_jobs=8)(
-    delayed(compute_pair)(i, j)
-    for i, j in pairs
-)
-
-pd.DataFrame(results).to_csv(
-    base_dir / "analysis/pairwise_stats.csv",
-    index=False
-)

@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH --output=../logs/ami_%j.out
+#SBATCH --error=../logs/ami_%j.err
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=16G
+#SBATCH --time=12:00:00
+
+source ../.env/bin/activate
+
+python pairwise_ami.py
+

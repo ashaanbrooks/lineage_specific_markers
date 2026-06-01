@@ -8,4 +8,5 @@
 source define_paths.sh
 
 # cgmlst-dists already installed and in PATH
-cgmlst-dists -j 8 "$ANALYSIS_DIR"/chewbbaca_ridom/results_alleles_filtered.tsv > "$ANALYSIS_DIR"/chewbbaca_ridom/distances_filtered.tsv
+# Add -x 2500 so that cgmlst-dists does not stop calculating distances at 999
+cgmlst-dists -j 8 -x 2500 "$ANALYSIS_DIR"/chewbbaca_ridom/results_alleles_filtered.tsv > "$ANALYSIS_DIR"/chewbbaca_ridom/distances_filtered.tsv
