@@ -1,11 +1,15 @@
 #!/bin/bash
 
-# Renumber scripts based on list order
+LIST="order_list.txt"
+
+total=$(grep -c . "$LIST")
+width=${#total}
+
 i=1
 while IFS= read -r filename || [[ -n "$filename" ]]; do
   [[ -z "$filename" ]] && continue
 
-  match=$(find . -maxdepth 1 -name "*_${filename}" | head -1)
+  match=$(find . -maxdepth 1 -name "*${filename}" -o -maxdepth 1 -name "${filename}" | head -1)
 
   if [[ -z "$match" ]]; then
     echo "Warning: '$filename' not found, skipping."
@@ -13,8 +17,8 @@ while IFS= read -r filename || [[ -n "$filename" ]]; do
     continue
   fi
 
-  mv -- "$match" "${i}_${filename}"
-  echo "Renamed: $filename -> ${i}_${filename}"
+  padded=$(printf "%0${width}d" "$i")
+  mv -- "$match" "${padded}_${filename}"
+  echo "Renamed: $match -> ${padded}_${filename}"
   ((i++))
-done < order_list.txt
-
+done < "$LIST"
