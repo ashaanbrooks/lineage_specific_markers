@@ -4,6 +4,9 @@ analysis/**
 logs/**
 results/**
 
+# Ignore unused scripts
+scripts/unused_scripts/**
+
 # Ignore .here, .Rproj
 .here
 .Rproj.user

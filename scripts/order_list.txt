@@ -1,0 +1,13 @@
+get_atb_metadata.sh
+download_schema.sh
+prodigal_training_file.sh
+chewbbaca_prep_external_schema.sh
+chewbbaca_allele_call.sh
+mash.sh
+detect_duplicates.sh
+assembly_qc.R
+subset_allele_calls_after_qc.sh
+cgmlst_distances.sh
+reportree_hc.sh
+run_cluster_stats.sh
+run_pairwise_ami.sh
