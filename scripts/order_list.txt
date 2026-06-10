@@ -11,3 +11,5 @@ cgmlst_distances.sh
 reportree_hc.sh
 run_cluster_stats.sh
 run_pairwise_ami.sh
+split_dataset_for_panaroo.R
+convert_samples_to_filepaths_for_panaroo.sh

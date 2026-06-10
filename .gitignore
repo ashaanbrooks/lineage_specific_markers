@@ -1,8 +1,9 @@
-# Ignore data, analysis, logs, results
+# Ignore data, analysis, logs, results, environments
 data/**
 analysis/**
 logs/**
 results/**
+envs/**
 
 # Ignore unused scripts
 scripts/unused_scripts/**

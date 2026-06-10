@@ -5,7 +5,7 @@
 #SBATCH --mem=16G
 #SBATCH --time=12:00:00
 
-source ../.env/bin/activate
+source ../envs/cluster_stats/bin/activate
 
 python pairwise_ami.py
 
