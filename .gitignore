@@ -7,6 +7,8 @@ envs/**
 
 # Ignore unused scripts
 scripts/unused_scripts/**
+scripts/.ipynb_checkpoints/**
+
 
 # Ignore .here, .Rproj
 .here
@@ -15,3 +17,4 @@ scripts/unused_scripts/**
 .RData
 .Rhistory
 .env
+

@@ -9,3 +9,5 @@ export CHEWBBACA_APPTAINER=/scratch/ybrooks/chewbbaca/chewbbaca_v3.3.10.sif
 export REPORTREE_APPTAINER=/project/rrg-whsiao-ab/cidgoh_share/singularity_imgs/reportree_v2.6.0.sif
 
 export PANAROO_ENV=/scratch/ybrooks/lineage_specific_markers/envs/panaroo
+export HDBSCAN_ENV=/scratch/ybrooks/kmer_clustering/hdbscan_env
+export CLASSIFIER_ENV=/scratch/ybrooks/lineage_specific_markers/envs/classifiers

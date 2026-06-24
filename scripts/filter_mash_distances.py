@@ -3,12 +3,12 @@ import numpy as np
 from pathlib import Path
 
 repo_root = Path(__file__).parent.parent
-DIST_FILE = repo_root / "analysis" / "mash" / "pairwise_distances.tsv"
+DIST_FILE = repo_root / "analysis" / "mash" / "pairwise_distances.txt"
 KEEP_FILE = repo_root / "analysis" / "samples_for_clustering.txt"
 OUTPUT_FILE = repo_root / "analysis" / "mash" / "pairwise_distances_filtered.npy"
 
 with open(KEEP_FILE, 'r') as f:
-    samples_to_keep = {line.strip() for line in f if line.strip()}
+    samples_to_keep = [line.strip() for line in f if line.strip()]
 
 sample_indices = {s: i for i, s in enumerate(samples_to_keep)}
 num_samples = len(sample_indices)
@@ -17,7 +17,9 @@ distance_matrix = np.zeros((num_samples, num_samples), dtype=np.float32)
 
 with open(DIST_FILE, 'r') as f:
     for line in f:
-        sample1, sample2, distance, *_ = line.strip().split('\t')
+        file1, file2, distance, *_ = line.strip().split('\t')
+        sample1 = Path(file1).stem
+        sample2 = Path(file2).stem
         if sample1 in sample_indices and sample2 in sample_indices:
             idx1 = sample_indices[sample1]
             idx2 = sample_indices[sample2]

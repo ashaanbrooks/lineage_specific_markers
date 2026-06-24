@@ -458,8 +458,6 @@ ggplot(st_cluster_ami, aes(x = threshold, y = adj_mutual_info)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-
-
 Finally, we also include a heatmap of the pairwise adjusted mutual information (AMI) as another way of visualizing the size of the stable regions. AMI was calculated using FastAMI, with a accuracy_goal of 0.001. AMI was used here instead of AWC as it is symmetric, and instead of the adjusted Rand index as it better accounts for unbalanced clusterings, with variable cluster sizes. 
 
 ```{r}
